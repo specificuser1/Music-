@@ -1,13 +1,13 @@
-const { SlashCommandBuilder } = require('discord.js');
-const { joinVoiceChannel, createAudioResource, StreamType, createAudioPlayer } = require('@discordjs/voice');
+const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, StreamType, AudioPlayerStatus } = require('@discordjs/voice');
 const playdl = require('play-dl');
-const { createEmbed } = require('../../utils/embeds');
 const config = require('../../config');
+const ffmpeg = require('ffmpeg-static');
 
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('play')
-        .setDescription('Play a song or playlist')
+        .setDescription('Play a song from YouTube or URL')
         .addStringOption(opt => opt.setName('query').setDescription('Song name or URL').setRequired(true)),
     
     async execute(interaction) {
@@ -15,40 +15,96 @@ module.exports = {
         const query = interaction.options.getString('query');
         const voiceChannel = interaction.member.voice.channel;
 
+        // ✅ Voice channel validation
         if (!voiceChannel) {
-            return interaction.editReply({ embeds: [createEmbed({ title: `${config.emojis.error} Voice Channel Required`, description: 'Pehle kisi voice channel join karein!', color: 0xff0000 })] });
+            return interaction.editReply({ 
+                embeds: [createErrorEmbed('Voice Channel Required', 'Pehle kisi voice channel join karein!')] 
+            });
+        }
+
+        const permissions = voiceChannel.permissionsFor(interaction.client.user);
+        if (!permissions.has('Connect') || !permissions.has('Speak')) {
+            return interaction.editReply({ 
+                embeds: [createErrorEmbed('Permission Denied', 'Mujhe connect/speak ki permission chahiye!')] 
+            });
         }
 
         try {
-            const search = await playdl.search(query, { limit: 1 });
-            if (!search?.length) throw new Error('No results found');
+            // ✅ Search/Validate URL
+            const search = query.startsWith('http') 
+                ? await playdl.video_info(query) 
+                : await playdl.search(query, { limit: 1 });
+            
+            const video = query.startsWith('http') ? search : search[0];
+            if (!video) throw new Error('No results found');
 
-            const video = search[0];
-            const stream = await playdl.stream(video.url, { quality: 0 });
+            // ✅ Stream setup with ffmpeg
+            const stream = await playdl.stream(video.url || video, {
+                quality: 0, // highest quality
+                dl: false,
+                ffmpegArgs: ['-b:a', '128k'] // optimize for Discord
+            });
 
+            // ✅ Voice connection
             const connection = joinVoiceChannel({
-                channelId: voiceChannel.id,
-                guildId: interaction.guild.id,
-                adapterCreator: interaction.guild.voiceAdapterCreator
+                channelId: voiceChannel.id,                guildId: interaction.guild.id,
+                adapterCreator: interaction.guild.voiceAdapterCreator,
+                selfDeaf: true
             });
 
             const player = createAudioPlayer();
-            const resource = createAudioResource(stream.stream, { inputType: StreamType.Arbitrary, inlineVolume: true });
+            
+            // ✅ Create resource with ffmpeg path
+            const resource = createAudioResource(stream.stream, {
+                inputType: StreamType.Arbitrary,
+                inlineVolume: true,
+                ffmpegPath: ffmpeg
+            });
+
             player.play(resource);
             connection.subscribe(player);
 
-            // Queue system ko future mein yahan extend kar sakte hain
-            interaction.client.currentPlayer = player;
+            // ✅ Store for queue system (future)
+            if (!interaction.client.music) interaction.client.music = {};
+            interaction.client.music[interaction.guild.id] = { player, connection, queue: [] };
 
-            await interaction.editReply({ embeds: [createEmbed({
-                title: `${config.emojis.play} Now Playing`,
-                description: `**${video.title}**\n🕒 ${video.durationFormatted || 'Unknown'}`,
-                thumbnail: video.thumbnails[0]?.url
-            })] });
+            // ✅ Premium Embed Response
+            await interaction.editReply({ 
+                embeds: [createSuccessEmbed('Now Playing', `🎵 **${video.title || video.video_details?.title}**\n🔗 [Watch](${video.url || video.video_details?.url})`, video.thumbnails?.[0]?.url || video.video_details?.thumbnails?.[0]?.url)] 
+            });
+
+            // ✅ Error handling for player
+            player.on('error', err => {
+                console.error('Player Error:', err);
+                interaction.channel.send({ 
+                    embeds: [createErrorEmbed('Playback Error', 'Audio play karte waqt error aaya.')] 
+                });
+            });
 
         } catch (err) {
-            console.error('Play Error:', err.message);
-            await interaction.editReply({ embeds: [createEmbed({ title: `${config.emojis.error} Playback Failed`, description: 'Song play nahi ho saka. URL/Query check karein ya baad mein try karein.', color: 0xff0000 })] });
+            console.error('Play Command Error:', err.message);
+            await interaction.editReply({ 
+                embeds: [createErrorEmbed('Command Failed', `Error: ${err.message.slice(0, 100)}...`)] 
+            });
         }
     }
 };
+
+// 🎨 Helper Functions for Premium Embeds
+function createSuccessEmbed(title, description, thumbnail) {
+    return new EmbedBuilder()
+        .setColor(config.premiumColor)
+        .setTitle(`${config.emojis.play} ${title}`)
+        .setDescription(description)
+        .setThumbnail(thumbnail)        .setFooter({ text: config.footer })
+        .setTimestamp();
+}
+
+function createErrorEmbed(title, description) {
+    return new EmbedBuilder()
+        .setColor(0xff0000)
+        .setTitle(`${config.emojis.error} ${title}`)
+        .setDescription(description)
+        .setFooter({ text: config.footer })
+        .setTimestamp();
+}
