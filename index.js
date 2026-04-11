@@ -20,21 +20,22 @@ client.config = config;
 
 // 🛡️ Global Error Handling
 process.on('unhandledRejection', (err) => console.error('🔻 Unhandled Promise:', err));
-process.on('uncaughtException', (err) => {
-    console.error('💥 Uncaught Exception:', err.message);
-    // Bot ko crash hone se bachane ke liye destroy nahi karenge
-});
+process.on('uncaughtException', (err) => console.error('💥 Uncaught Exception:', err.message));
 
-// 📂 Load Commands (Fixed: Flat Folder Structure Support)
-const commandFolders = fs.readdirSync('./commands');
+// 📂 Load Commands (Fixed: __dirname + Absolute Paths)
+const commandsDir = path.join(__dirname, 'commands');
+const commandFolders = fs.readdirSync(commandsDir);
+
 for (const folder of commandFolders) {
-    const folderPath = path.join('./commands', folder);
+    const folderPath = path.join(commandsDir, folder);
     if (fs.statSync(folderPath).isDirectory()) {
         const commandFiles = fs.readdirSync(folderPath).filter(file => file.endsWith('.js'));
         for (const file of commandFiles) {
             try {
-                const command = require(path.join(folderPath, file));
-                if (command.name && command.execute) {
+                const filePath = path.join(folderPath, file);
+                const command = require(filePath);
+                
+                if (command.name && typeof command.execute === 'function') {
                     client.commands.set(command.name, command);
                     if (Array.isArray(command.aliases)) {
                         command.aliases.forEach(alias => client.aliases.set(alias, command.name));
@@ -49,9 +50,11 @@ for (const folder of commandFolders) {
 }
 
 // 📂 Load Events
-const eventFiles = fs.readdirSync('./events').filter(file => file.endsWith('.js'));
+const eventsDir = path.join(__dirname, 'events');
+const eventFiles = fs.readdirSync(eventsDir).filter(file => file.endsWith('.js'));
+
 for (const file of eventFiles) {
-    const event = require(`./events/${file}`);
+    const event = require(path.join(eventsDir, file));
     // v14 Deprecation Fix: 'ready' → 'clientReady'
     const eventName = event.name === 'ready' ? 'clientReady' : event.name;
     
