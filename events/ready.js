@@ -1,8 +1,8 @@
 module.exports = {
-    name: 'ready',
+    name: 'clientReady', // ✅ Changed from 'ready' to 'clientReady'
     once: true,
     execute(client) {
-        console.log(`💡🤖 ${client.user.tag} online! - Programmed by WarriorTeam`);
-        client.user.setActivity('/play | Mia Music', { type: 2 });
+        console.log(`✅ ${client.user.tag} is online & ready! 🎧`);
+        client.user.setActivity('!play | Mozi Music', { type: 2 });
     }
 };
