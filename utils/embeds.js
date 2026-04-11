@@ -1,7 +1,7 @@
 const { EmbedBuilder } = require('discord.js');
 const config = require('../config');
 
-function createEmbed({ title, description, color, thumbnail, fields = [] } = {}) {
+function createEmbed(title, description, color, thumbnail, fields = []) {
     const embed = new EmbedBuilder()
         .setColor(color || config.premiumColor)
         .setFooter({ text: config.footer })
